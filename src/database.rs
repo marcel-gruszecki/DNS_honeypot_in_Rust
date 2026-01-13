@@ -102,34 +102,100 @@ pub async fn db_daily_refresh(db: Arc<SqlitePool>) {
 
 }
 
-async fn daily(db: Arc<SqlitePool>) -> Result<(), sqlx::Error> {
-    db.execute(sqlx::query(
+async fn daily(db: Arc<SqlitePool>, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut forbidden_domains = Vec::new();
+    if Path::new(file_path).exists() {
+        let file = File::open(file_path)?;
+        let reader = BufReader::new(file);
+        for line in reader.lines() {
+            let domain = line?.trim().to_string();
+            if !domain.is_empty() {
+                forbidden_domains.push(domain);
+            }
+        }
+    }
+
+    let forbidden_placeholders = if forbidden_domains.is_empty() {
+        "'---empty-list---'".to_string()
+    } else {
+        forbidden_domains.iter().map(|_| "?").collect::<Vec<_>>().join(",")
+    };
+
+    let sql = format!(
         "
         INSERT OR REPLACE INTO daily_summary (day, total_events, by_class, first_seen, last_seen)
+
+        -- Klasa 1: Brute Force
         SELECT
-            bf.day,
-            COUNT(bf.Czas_Sekunda),
-            'Brute Force',
-            MIN(bf.Czas_Sekunda),
-            MAX(bf.Czas_Sekunda)
+            day,
+            COUNT(*) as total_events,
+            'Brute Force' as by_class,
+            MIN(Czas_Sekunda) as first_seen,
+            MAX(Czas_Sekunda) as last_seen
         FROM (
             SELECT
                 STRFTIME('%Y-%m-%d %H:%M:%S', timestamp) AS Czas_Sekunda,
                 day,
                 client_ip
-            FROM
-                logs
-            GROUP BY
-                Czas_Sekunda,
-                client_ip
-            HAVING
-                COUNT(*) >= 20
-        ) AS bf
-        GROUP BY
-            bf.day;
-            "
-    )).await?;
+            FROM logs
+            GROUP BY Czas_Sekunda, client_ip
+            HAVING COUNT(*) >= 20
+        )
+        GROUP BY day
 
+        UNION ALL
+
+        -- Klasa 2: Zapytania ANY
+        SELECT
+            day,
+            COUNT(*),
+            'Query ANY',
+            MIN(timestamp),
+            MAX(timestamp)
+        FROM logs
+        WHERE qtype = 'ANY'
+        GROUP BY day
+
+        UNION ALL
+
+        -- Klasa 3: Zapytania TXT
+        SELECT
+            day,
+            COUNT(*),
+            'Query TXT',
+            MIN(timestamp),
+            MAX(timestamp)
+        FROM logs
+        WHERE qtype = 'TXT'
+        GROUP BY day
+
+        UNION ALL
+
+        -- Klasa 4: Lista zakazana (Forbidden Domains)
+        SELECT
+            day,
+            COUNT(*),
+            'Forbidden Domain',
+            MIN(timestamp),
+            MAX(timestamp)
+        FROM logs
+        WHERE qname IN ({})
+        GROUP BY day;
+        ",
+        forbidden_placeholders
+    );
+
+    let mut query = sqlx::query(&sql);
+
+    if !forbidden_domains.is_empty() {
+        for domain in forbidden_domains {
+            query = query.bind(domain);
+        }
+    }
+
+    db.execute(query).await?;
+
+    println!("Daily summary updated successfully.");
     Ok(())
 }
 
