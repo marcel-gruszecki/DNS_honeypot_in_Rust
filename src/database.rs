@@ -1,4 +1,5 @@
-use std::io::{BufRead};
+use std::fs::OpenOptions;
+use std::io::{BufRead, BufReader};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -98,9 +99,15 @@ pub async fn db_daily_refresh(db: Arc<SqlitePool>) {
 async fn daily(db: Arc<SqlitePool>, file_path: &str) {
     let mut forbidden_domains = Vec::new();
 
-    match std::fs::File::open(file_path) {
+    let file_result = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(file_path);
+
+    match file_result {
         Ok(file) => {
-            let reader = std::io::BufReader::new(file);
+            let reader = BufReader::new(file);
             for line in reader.lines() {
                 if let Ok(domain) = line {
                     let trimmed = domain.trim();
@@ -111,9 +118,9 @@ async fn daily(db: Arc<SqlitePool>, file_path: &str) {
             }
         }
         Err(e) => {
-            console_print_err(format!("Warning: Could not open forbidden domains file: {}", e));
+            console_print_err(format!("Error handling forbidden domains file ({}): {}", file_path, e));
         }
-    }
+    };
 
     let forbidden_placeholders = if forbidden_domains.is_empty() {
         "'---empty-list---'".to_string()

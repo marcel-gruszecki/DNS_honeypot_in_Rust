@@ -9,7 +9,6 @@ services:
       - "53:53/tcp"
     volumes:
       - ./data:/app/data
-      - ./forbidden.txt:/app/forbidden.txt  # Mapowanie pliku z domenami
     environment:
       - DATABASE_URL=/app/data/honeypot.db
       - TZ=Europe/Warsaw
@@ -18,17 +17,16 @@ services:
       - honeynet
 
   db_viewer:
-    image: adminer:latest
+    image: coleifer/sqlite-web
     container_name: db_viewer
     ports:
       - "8080:8080"
+    volumes:
+      - ./data:/data
     environment:
-      - ADMINER_DEFAULT_SERVER=sqlite
-      - ADMINER_DESIGN=pepa-linha
+      - SQLITE_DATABASE=honeypot.db
     networks:
       - honeynet
-    volumes:
-      - ./data:/app/data
 
 networks:
   honeynet:
