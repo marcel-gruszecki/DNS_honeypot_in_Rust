@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "Projekt_2"
+name = "DNS_honeypot"
 version = "0.1.0"
 dependencies = [
  "chrono",

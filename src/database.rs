@@ -1,4 +1,7 @@
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use chrono::Local;
@@ -10,7 +13,9 @@ use crate::{console_print, console_print_err, IP, PORT};
 use crate::dns::Request;
 
 const DAILY_REFRESH_TIME: Duration = Duration::new(3600, 00);
-pub const DB_PATH: &str = "./dns_logs.sqlite";
+pub const DB_PATH: &str = "/app/data/honeypot.db";
+
+pub const FL_PATH: &str = "/app/data/forbidden_domains.txt";
 
 pub async fn connect_to_database() -> Arc<Pool<Sqlite>> {
     loop {
@@ -88,30 +93,27 @@ pub async fn db_daily_refresh(db: Arc<SqlitePool>) {
 
     loop {
         interval.tick().await;
-
-        match daily(db.clone()).await {
-            Ok(_) => {console_print(String::from("Daily database has been refreshed."));}
-            Err(err) => {
-                console_print_err(format!("Database daily refresh error: {}", err));
-                sleep(Duration::from_secs(1)).await;
-                console_print(String::from("Trying to initialized in 5 sec."));
-                sleep(Duration::from_secs(5)).await;
-            }
-        }
+        daily(db.clone(), FL_PATH).await;
     }
-
 }
 
-async fn daily(db: Arc<SqlitePool>, file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn daily(db: Arc<SqlitePool>, file_path: &str) {
     let mut forbidden_domains = Vec::new();
-    if Path::new(file_path).exists() {
-        let file = File::open(file_path)?;
-        let reader = BufReader::new(file);
-        for line in reader.lines() {
-            let domain = line?.trim().to_string();
-            if !domain.is_empty() {
-                forbidden_domains.push(domain);
+
+    match std::fs::File::open(file_path) {
+        Ok(file) => {
+            let reader = std::io::BufReader::new(file);
+            for line in reader.lines() {
+                if let Ok(domain) = line {
+                    let trimmed = domain.trim();
+                    if !trimmed.is_empty() {
+                        forbidden_domains.push(trimmed.to_string());
+                    }
+                }
             }
+        }
+        Err(e) => {
+            console_print_err(format!("Warning: Could not open forbidden domains file: {}", e));
         }
     }
 
@@ -125,62 +127,46 @@ async fn daily(db: Arc<SqlitePool>, file_path: &str) -> Result<(), Box<dyn std::
         "
         INSERT OR REPLACE INTO daily_summary (day, total_events, by_class, first_seen, last_seen)
 
-        -- Klasa 1: Brute Force
-        SELECT
-            day,
-            COUNT(*) as total_events,
-            'Brute Force' as by_class,
-            MIN(Czas_Sekunda) as first_seen,
-            MAX(Czas_Sekunda) as last_seen
+        -- 1. Flood Attack (>50 queries/min)
+        SELECT day, COUNT(*) as total_events, 'Flood Attack', MIN(timestamp), MAX(timestamp)
         FROM (
-            SELECT
-                STRFTIME('%Y-%m-%d %H:%M:%S', timestamp) AS Czas_Sekunda,
-                day,
-                client_ip
+            SELECT day, timestamp, client_ip, STRFTIME('%Y-%m-%d %H:%M', timestamp) as minuta
             FROM logs
-            GROUP BY Czas_Sekunda, client_ip
-            HAVING COUNT(*) >= 20
         )
+        GROUP BY day, minuta
+        HAVING COUNT(*) >= 50
+
+        UNION ALL
+
+        -- 2. Zone Transfer
+        SELECT day, COUNT(*), 'Zone Transfer', MIN(timestamp), MAX(timestamp)
+        FROM logs WHERE q_type IN ('AXFR', 'IXFR') GROUP BY day
+
+        UNION ALL
+
+        -- 3. DNS Tunneling (Checking question length)
+        SELECT day, COUNT(*), 'DNS Tunneling', MIN(timestamp), MAX(timestamp)
+        FROM logs WHERE LENGTH(question) > 60 GROUP BY day
+
+        UNION ALL
+
+        -- 4. Fingerprinting
+        SELECT day, COUNT(*), 'Fingerprinting', MIN(timestamp), MAX(timestamp)
+        FROM logs
+        WHERE question LIKE '%version.bind%' OR question LIKE '%hostname.bind%' OR question LIKE '%id.server%'
         GROUP BY day
 
         UNION ALL
 
-        -- Klasa 2: Zapytania ANY
-        SELECT
-            day,
-            COUNT(*),
-            'Query ANY',
-            MIN(timestamp),
-            MAX(timestamp)
-        FROM logs
-        WHERE qtype = 'ANY'
-        GROUP BY day
+        -- 5. Amplification
+        SELECT day, COUNT(*), 'Amplification Attempt', MIN(timestamp), MAX(timestamp)
+        FROM logs WHERE q_type IN ('ANY', 'TXT') GROUP BY day
 
         UNION ALL
 
-        -- Klasa 3: Zapytania TXT
-        SELECT
-            day,
-            COUNT(*),
-            'Query TXT',
-            MIN(timestamp),
-            MAX(timestamp)
-        FROM logs
-        WHERE qtype = 'TXT'
-        GROUP BY day
-
-        UNION ALL
-
-        -- Klasa 4: Lista zakazana (Forbidden Domains)
-        SELECT
-            day,
-            COUNT(*),
-            'Forbidden Domain',
-            MIN(timestamp),
-            MAX(timestamp)
-        FROM logs
-        WHERE qname IN ({})
-        GROUP BY day;
+        -- 6. Forbidden Domains
+        SELECT day, COUNT(*), 'Forbidden Domain', MIN(timestamp), MAX(timestamp)
+        FROM logs WHERE question IN ({}) GROUP BY day;
         ",
         forbidden_placeholders
     );
@@ -193,11 +179,25 @@ async fn daily(db: Arc<SqlitePool>, file_path: &str) -> Result<(), Box<dyn std::
         }
     }
 
-    db.execute(query).await?;
+    match db.execute(query).await {
+        Ok(_) => console_print(String::from("Daily summary successfully updated in database.")),
+        Err(e) => console_print_err(format!("SQL Error in daily summary: {}", e)),
+    }
 
-    println!("Daily summary updated successfully.");
-    Ok(())
+    // Cleaning logs older than 3 days (Changed from -7 to -3 as requested before)
+    match db.execute(sqlx::query("DELETE FROM logs WHERE timestamp < DATETIME('now', '-3 days');")).await {
+        Ok(result) => {
+            let rows = result.rows_affected();
+            if rows > 0 {
+                console_print(format!("Cleanup: Removed {} old log entries (older than 3 days).", rows));
+            }
+        },
+        Err(e) => {
+            console_print_err(format!("SQL Error (Cleanup): {}", e));
+        }
+    }
 }
+
 
 pub async fn send_log(db: Arc<SqlitePool>, record: Request, len: usize, addr: SocketAddr) -> Result<(), sqlx::Error> {
     let timestamp = Local::now();

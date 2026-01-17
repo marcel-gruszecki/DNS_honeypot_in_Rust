@@ -26,8 +26,9 @@ use crate::dns::{handle_request};
 use crate::tcp_module::tcp_server;
 use crate::udp_module::udp_server;
 
-pub const IP: Ipv4Addr = Ipv4Addr::new(127, 0, 0, 1);
-pub const PORT: u32 = 8080;
+pub const IP: Ipv4Addr = Ipv4Addr::new(0, 0, 0, 0);
+pub const PORT: u32 = 53;
+
 
 #[tokio::main]
 async fn main() {

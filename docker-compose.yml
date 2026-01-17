@@ -1,0 +1,35 @@
+version: "3.8"
+
+services:
+  honeypot:
+    build: .
+    container_name: dns_honeypot
+    ports:
+      - "53:53/udp"
+      - "53:53/tcp"
+    volumes:
+      - ./data:/app/data
+      - ./forbidden.txt:/app/forbidden.txt  # Mapowanie pliku z domenami
+    environment:
+      - DATABASE_URL=/app/data/honeypot.db
+      - TZ=Europe/Warsaw
+    restart: unless-stopped
+    networks:
+      - honeynet
+
+  db_viewer:
+    image: adminer:latest
+    container_name: db_viewer
+    ports:
+      - "8080:8080"
+    environment:
+      - ADMINER_DEFAULT_SERVER=sqlite
+      - ADMINER_DESIGN=pepa-linha
+    networks:
+      - honeynet
+    volumes:
+      - ./data:/app/data
+
+networks:
+  honeynet:
+    driver: bridge
