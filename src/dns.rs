@@ -2,7 +2,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use hickory_server::proto::op::{Message, MessageType, Query};
 use hickory_server::proto::ProtoError;
 use hickory_server::proto::rr::{Name, RData, Record, RecordType};
-use hickory_server::proto::rr::rdata::{HINFO, MX, NS, NULL, TXT};
+use hickory_server::proto::rr::rdata::{HINFO, MX, NS, TXT};
 use hickory_server::proto::serialize::binary::{BinEncodable, BinEncoder};
 use rand::prelude::*;
 
@@ -91,7 +91,7 @@ pub fn build_record(query: &Query) -> Record {
 
         RecordType::TXT => {
             let txt_name = String::from("TXT_respone");
-            (Record::from_rdata(name, ttl, RData::TXT(TXT::new(vec![txt_name]))))
+            Record::from_rdata(name, ttl, RData::TXT(TXT::new(vec![txt_name])))
         },
         _ => {
             let txt_name = String::from("Unknown type.");

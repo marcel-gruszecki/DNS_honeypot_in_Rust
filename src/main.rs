@@ -1,28 +1,11 @@
-/*
-Zapytania dla ANY:
-Zapytania dla reszty: dig @127.0.0.1 -p 8080 google.com
-
-Do zrobienia:
-- Dodać ograniczenie do 10 000 000 logow.
-- Dodać klase atakow gdy sa zapytania TXT i ANY.
-- Dodać klase atakow gdy sa zapytania do zablokowanej listy.
- */
 mod database;
 mod dns;
 mod tcp_module;
 mod udp_module;
 
-use std::net::{Ipv4Addr, SocketAddr};
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::net::UdpSocket;
-use tokio::time::sleep;
+use std::net::{Ipv4Addr};
 use chrono::Local;
-use sqlx::{Pool, Sqlite};
-use hickory_server::{ServerFuture};
-use std::net::IpAddr;
-use crate::database::{connect_to_database, database_init, db_daily_refresh, send_log, DB_PATH};
-use crate::dns::{handle_request};
+use crate::database::{connect_to_database, database_init, db_daily_refresh};
 use crate::tcp_module::tcp_server;
 use crate::udp_module::udp_server;
 
