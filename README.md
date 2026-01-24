@@ -86,4 +86,35 @@ Interfejs graficzny do zarządzania bazą danych i podglądu tabel jest dostępn
 http://localhost:8080
 ```
 
-### 3. Testowanie
+### 3. Przykładowe testy
+```bash
+#!/bin/bash
+
+TARGET="127.0.0.1"
+PORT="53"
+
+# 2. Zone Transfer (Próba pobrania strefy)
+dig @$TARGET -p $PORT example.com AXFR
+dig @$TARGET -p $PORT example.com IXFR
+
+# 3. DNS Tunneling (Długie zapytanie > 60 znaków)
+# LONG_QUERY="v1-a5b6c7d8e9f0g1h2i3j4k5l6m7n8o9p0q1r2s3t4u5v6w7x8y9z0-extra-long-subdomain.example.com"
+# Łącznie ma ok. 80 znaków, ale każda część ma mniej niż 63.
+dig @127.0.0.1 -p 8080 $LONG_QUERY A
+# dig @$TARGET -p $PORT $LONG_QUERY A
+
+# 4. Amplification Attempt (Typy ANY i TXT)
+dig @$TARGET -p $PORT google.com ANY
+dig @$TARGET -p $PORT google.com TXT
+
+# 5. Forbidden Domain (Upewnij się, że domena jest w forbidden_domains.txt)
+# Zakładamy, że dodałeś 'facebook.com' do pliku
+dig @$TARGET -p $PORT zakazanadomena.com A
+
+# 6. Flood Attack (Wysyłanie 60 zapytań w pętli - limit masz na 50)
+for i in {1..60}
+do
+   dig @$TARGET -p $PORT flood-test-$i.com A +short > /dev/null 2>&1
+done
+
+```
