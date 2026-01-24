@@ -53,7 +53,6 @@ Silnik analityczny automatycznie rozpoznaje i kategoryzuje następujące zagroż
 | **Flood Attack** | Wykrywany przy intensywnym ruchu (powyżej 50 zapytań na minutę z jednego IP). |
 | **Zone Transfer** | Próby pobrania strefy DNS (typy AXFR/IXFR) w celu rekonesansu sieci. |
 | **DNS Tunneling** | Zapytania powyżej 60 znaków, co sugeruje ukryty kanał komunikacji. |
-| **Fingerprinting** | Próby rozpoznania oprogramowania (np. zapytania `version.bind` lub `id.server`). |
 | **Amplification Attempt** | Wykorzystanie typów ANY lub TXT do ataków DDoS typu Reflection. |
 | **Forbidden Domain** | Zapytania o domeny zdefiniowane w pliku `forbidden_domains.txt`. |
 
@@ -76,8 +75,15 @@ Usunięcie:
 sudo docker compose down -v
 ```
 
-### 2. Przegląd zebranych danych
+### 2. Sprawdzanie logów
+```
+docker compose logs
+```
+
+### 3. Przegląd zebranych danych
 Interfejs graficzny do zarządzania bazą danych i podglądu tabel jest dostępny bezpośrednio w przeglądarce:
 ```
 http://localhost:8080
 ```
+
+### 3. Testowanie

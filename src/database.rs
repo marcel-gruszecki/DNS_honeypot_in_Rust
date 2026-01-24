@@ -11,7 +11,7 @@ use tokio::time::sleep;
 use crate::{console_print, console_print_err, IP, PORT};
 use crate::dns::Request;
 
-const DAILY_REFRESH_TIME: Duration = Duration::new(3600, 00);
+const DAILY_REFRESH_TIME: Duration = Duration::new(10, 00);
 pub const DB_PATH: &str = "/app/data/honeypot.db";
 
 pub const FL_PATH: &str = "/app/data/forbidden_domains.txt";
@@ -132,20 +132,22 @@ async fn daily(db: Arc<SqlitePool>, file_path: &str) {
         "
         INSERT OR REPLACE INTO daily_summary (day, total_events, by_class, first_seen, last_seen)
 
-        -- 1. Flood Attack (>50 queries/min)
-        SELECT day, COUNT(*) as total_events, 'Flood Attack', MIN(timestamp), MAX(timestamp)
-        FROM (
-            SELECT day, timestamp, client_ip, STRFTIME('%Y-%m-%d %H:%M', timestamp) as minuta
+        -- 1. Flood Attack (Jeśli w jakiejkolwiek minucie było > 50 zapytań, zliczamy to jako 1 incydent Flood na dzień)
+            SELECT day, 1, 'Flood Attack', MIN(timestamp), MAX(timestamp)
             FROM logs
-        )
-        GROUP BY day, minuta
-        HAVING COUNT(*) >= 50
+            WHERE client_ip IN (
+                SELECT client_ip
+                FROM logs
+                GROUP BY day, client_ip, STRFTIME('%Y-%m-%d %H:%M', timestamp)
+                HAVING COUNT(*) >= 50
+            )
+            GROUP BY day
 
         UNION ALL
 
         -- 2. Zone Transfer
         SELECT day, COUNT(*), 'Zone Transfer', MIN(timestamp), MAX(timestamp)
-        FROM logs WHERE q_type IN ('AXFR', 'IXFR') GROUP BY day
+        FROM logs WHERE q_type IN ('SOA') GROUP BY day
 
         UNION ALL
 
@@ -155,21 +157,13 @@ async fn daily(db: Arc<SqlitePool>, file_path: &str) {
 
         UNION ALL
 
-        -- 4. Fingerprinting
-        SELECT day, COUNT(*), 'Fingerprinting', MIN(timestamp), MAX(timestamp)
-        FROM logs
-        WHERE question LIKE '%version.bind%' OR question LIKE '%hostname.bind%' OR question LIKE '%id.server%'
-        GROUP BY day
-
-        UNION ALL
-
-        -- 5. Amplification
+        -- 4. Amplification
         SELECT day, COUNT(*), 'Amplification Attempt', MIN(timestamp), MAX(timestamp)
         FROM logs WHERE q_type IN ('ANY', 'TXT') GROUP BY day
 
         UNION ALL
 
-        -- 6. Forbidden Domains
+        -- 5. Forbidden Domains
         SELECT day, COUNT(*), 'Forbidden Domain', MIN(timestamp), MAX(timestamp)
         FROM logs WHERE question IN ({}) GROUP BY day;
         ",

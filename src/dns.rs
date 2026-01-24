@@ -2,7 +2,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 use hickory_server::proto::op::{Message, MessageType, Query};
 use hickory_server::proto::ProtoError;
 use hickory_server::proto::rr::{Name, RData, Record, RecordType};
-use hickory_server::proto::rr::rdata::{HINFO, MX, NS, TXT};
+use hickory_server::proto::rr::rdata::{HINFO, MX, NS, SOA, TXT};
 use hickory_server::proto::serialize::binary::{BinEncodable, BinEncoder};
 use rand::prelude::*;
 
@@ -93,6 +93,30 @@ pub fn build_record(query: &Query) -> Record {
             let txt_name = String::from("TXT_respone");
             Record::from_rdata(name, ttl, RData::TXT(TXT::new(vec![txt_name])))
         },
+
+        RecordType::AXFR => {
+            let mname = Name::from_ascii("ns1.example.com.").unwrap();
+            let rname = Name::from_ascii("admin.example.com.").unwrap();
+            let soa = SOA::new(
+                mname,
+                rname,
+                2023101001,
+                3600,
+                600,
+                86400,
+                3600
+            );
+            Record::from_rdata(name, ttl, RData::SOA(soa))
+        },
+
+        RecordType::IXFR => {
+            let mname = Name::from_ascii("ns1.example.com.").unwrap();
+            let rname = Name::from_ascii("admin.example.com.").unwrap();
+            let soa = SOA::new(mname, rname, 2023101002, 3600, 600, 86400, 3600);
+
+            Record::from_rdata(name, ttl, RData::SOA(soa))
+        },
+
         _ => {
             let txt_name = String::from("Unknown type.");
             Record::from_rdata(name, ttl, RData::TXT(TXT::new(vec![txt_name])))
