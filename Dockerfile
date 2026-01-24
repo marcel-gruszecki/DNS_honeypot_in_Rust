@@ -17,6 +17,4 @@ RUN chmod +x /app/honeypot_dns
 EXPOSE 53/udp
 EXPOSE 53/tcp
 
-
-# Uruchamiamy bezpośrednio
 CMD ["./honeypot_dns"]
