@@ -131,47 +131,49 @@ async fn daily(db: Arc<SqlitePool>, file_path: &str) {
     let sql = format!(
         "
         INSERT OR REPLACE INTO daily_summary (day, total_events, by_class, first_seen, last_seen)
-
-        -- 1. Flood Attack (Jeśli w jakiejkolwiek minucie było > 50 zapytań, zliczamy to jako 1 incydent Flood na dzień)
-        SELECT
-            day,
-            COUNT(*) as incident_count,
-            'Flood Attack',
-            MIN(timestamp),
-            MAX(timestamp)
+        SELECT day, total_events, by_class, first_seen, last_seen
         FROM (
+            -- 1. Flood Attack
             SELECT
                 day,
-                timestamp,
-                (ROW_NUMBER() OVER (PARTITION BY day, client_ip ORDER BY timestamp) - 1) / 60 AS group_id
-            FROM logs
-        ) AS grouped_logs
-        GROUP BY day, group_id
-        HAVING COUNT(*) >= 60;
+                COUNT(*) as total_events,
+                'Flood Attack' as by_class,
+                MIN(timestamp) as first_seen,
+                MAX(timestamp) as last_seen
+            FROM (
+                SELECT
+                    day,
+                    timestamp,
+                    (ROW_NUMBER() OVER (PARTITION BY day, client_ip ORDER BY timestamp) - 1) / 60 AS group_id
+                FROM logs
+            ) AS grouped_logs
+            GROUP BY day, group_id
+            HAVING COUNT(*) >= 60
 
-        UNION ALL
+            UNION ALL
 
-        -- 2. Zone Transfer
-        SELECT day, COUNT(*), 'Zone Transfer', MIN(timestamp), MAX(timestamp)
-        FROM logs WHERE q_type IN ('SOA') GROUP BY day
+            -- 2. Zone Transfer
+            SELECT day, COUNT(*), 'Zone Transfer', MIN(timestamp), MAX(timestamp)
+            FROM logs WHERE q_type IN ('SOA', 'AXFR', 'IXFR') GROUP BY day
 
-        UNION ALL
+            UNION ALL
 
-        -- 3. DNS Tunneling (Checking question length)
-        SELECT day, COUNT(*), 'DNS Tunneling', MIN(timestamp), MAX(timestamp)
-        FROM logs WHERE LENGTH(question) > 60 GROUP BY day
+            -- 3. DNS Tunneling
+            SELECT day, COUNT(*), 'DNS Tunneling', MIN(timestamp), MAX(timestamp)
+            FROM logs WHERE LENGTH(question) > 60 GROUP BY day
 
-        UNION ALL
+            UNION ALL
 
-        -- 4. Amplification
-        SELECT day, COUNT(*), 'Amplification Attempt', MIN(timestamp), MAX(timestamp)
-        FROM logs WHERE q_type IN ('ANY', 'TXT') GROUP BY day
+            -- 4. Amplification
+            SELECT day, COUNT(*), 'Amplification Attempt', MIN(timestamp), MAX(timestamp)
+            FROM logs WHERE q_type IN ('ANY', 'TXT') GROUP BY day
 
-        UNION ALL
+            UNION ALL
 
-        -- 5. Forbidden Domains
-        SELECT day, COUNT(*), 'Forbidden Domain', MIN(timestamp), MAX(timestamp)
-        FROM logs WHERE question IN ({}) GROUP BY day;
+            -- 5. Forbidden Domains
+            SELECT day, COUNT(*), 'Forbidden Domain', MIN(timestamp), MAX(timestamp)
+            FROM logs WHERE question IN ({}) GROUP BY day
+        );
         ",
         forbidden_placeholders
     );
