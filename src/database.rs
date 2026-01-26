@@ -11,7 +11,7 @@ use tokio::time::sleep;
 use crate::{console_print, console_print_err, IP, PORT};
 use crate::dns::Request;
 
-const DAILY_REFRESH_TIME: Duration = Duration::new(10, 00);
+const DAILY_REFRESH_TIME: Duration = Duration::new(3600, 00);
 pub const DB_PATH: &str = "/app/data/honeypot.db";
 
 pub const FL_PATH: &str = "/app/data/forbidden_domains.txt";
