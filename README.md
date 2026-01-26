@@ -81,12 +81,12 @@ docker compose logs
 ```
 
 ### 3. Przegląd zebranych danych
-Interfejs graficzny do zarządzania bazą danych i podglądu tabel jest dostępny bezpośrednio w przeglądarce:
+Interfejs graficzny do zarządzania bazą danych i podglądu tabel jest dostępny bezpośrednio w przeglądarce. Domyślne hasło do interfejsu to haslo:
 ```
 http://localhost:8080
 ```
 
-### 3. Przykładowe testy
+### 4. Przykładowe testy
 ```bash
 #!/bin/bash
 
