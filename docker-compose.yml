@@ -25,7 +25,6 @@ services:
       - ./data:/data
     environment:
       - SQLITE_DATABASE=honeypot.db
-      - SQLITE_WEB_PASSWORD=haslo  # Zmien haslo!!!
     networks:
       - honeynet
 
