@@ -133,15 +133,21 @@ async fn daily(db: Arc<SqlitePool>, file_path: &str) {
         INSERT OR REPLACE INTO daily_summary (day, total_events, by_class, first_seen, last_seen)
 
         -- 1. Flood Attack (Jeśli w jakiejkolwiek minucie było > 50 zapytań, zliczamy to jako 1 incydent Flood na dzień)
-            SELECT day, 1, 'Flood Attack', MIN(timestamp), MAX(timestamp)
+        SELECT
+            day,
+            COUNT(*) as incident_count,
+            'Flood Attack',
+            MIN(timestamp),
+            MAX(timestamp)
+        FROM (
+            SELECT
+                day,
+                timestamp,
+                (ROW_NUMBER() OVER (PARTITION BY day, client_ip ORDER BY timestamp) - 1) / 60 AS group_id
             FROM logs
-            WHERE client_ip IN (
-                SELECT client_ip
-                FROM logs
-                GROUP BY day, client_ip, STRFTIME('%Y-%m-%d %H:%M', timestamp)
-                HAVING COUNT(*) >= 50
-            )
-            GROUP BY day
+        ) AS grouped_logs
+        GROUP BY day, group_id
+        HAVING COUNT(*) >= 60;
 
         UNION ALL
 
