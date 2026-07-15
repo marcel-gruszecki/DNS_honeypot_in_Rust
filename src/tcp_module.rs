@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2025 Marcel Gruszecki
+
 use std::net::{SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;

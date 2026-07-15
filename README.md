@@ -1,120 +1,156 @@
-# DNS Honeypot Project
+# DNS Honeypot
 
-Asynchroniczny system typu honeypot przeznaczony do monitorowania i analizy ruchu DNS, napisany w języku Rust z wykorzystaniem bibliotek Tokio oraz SQLx. System symuluje działanie serwera DNS, rejestrując wszystkie przychodzące zapytania i poddając je automatycznej klasyfikacji pod kątem wzorców charakterystycznych dla cyberataków.
+A high-performance, asynchronous DNS honeypot written in Rust. It listens for DNS queries over both UDP and TCP, logs every request to a SQLite database, and automatically classifies traffic patterns associated with common attack techniques.
 
----
+## Features
 
-## Opis Systemu
+- **Dual-protocol support** — handles DNS over UDP and TCP simultaneously
+- **Persistent logging** — every query is stored in SQLite with full metadata (client IP, port, query type, timestamp)
+- **Automatic attack classification** — a background job runs hourly and categorises collected traffic into threat classes
+- **Deceptive responses** — returns plausible-looking but fake records to slow down reconnaissance
+- **Containerised** — ships as a two-container Docker Compose stack with a built-in web UI for the database
 
-Honeypot przechwytuje zapytania DNS przesyłane protokołami UDP oraz TCP. Dane są składowane w lokalnej bazie SQLite, która jest automatycznie inicjalizowana przy starcie aplikacji. System zawiera wbudowany silnik analityczny, który w określonych interwałach czasowych przetwarza surowe logi i generuje raporty bezpieczeństwa.
+## Tech Stack
 
----
+| Layer | Technology |
+|---|---|
+| Language | Rust (edition 2024) |
+| Async runtime | Tokio |
+| DNS parsing | hickory-server |
+| Database | SQLite via SQLx |
+| Containerisation | Docker / Docker Compose |
+| DB viewer | sqlite-web |
 
-## Struktura Bazy Danych
+## Architecture
 
-Aplikacja zarządza dwiema głównymi tabelami. Poniżej znajduje się szczegółowy opis ich zawartości:
+```
+                    ┌─────────────────────────────────────┐
+                    │           DNS Honeypot              │
+UDP :53 ──────────▶ │  udp_module  ──┐                    │
+                    │                ├──▶  dns.rs         │
+TCP :53 ──────────▶ │  tcp_module  ──┘   (parse & spoof)  │
+                    │                        │            │
+                    │               database.rs           │
+                    │          (log + hourly analysis)    │
+                    └──────────────┬──────────────────────┘
+                                   │
+                              SQLite DB
+                                   │
+                    ┌──────────────▼──────────────────────┐
+                    │  sqlite-web  :8080  (read-only UI)  │
+                    └─────────────────────────────────────┘
+```
 
-### Tabela: logs
-Przechowuje surowe informacje o każdym przechwyconym zapytaniu DNS.
+## Database Schema
 
-| Kolumna | Opis |
-| :--- | :--- |
-| **id** | Unikalny identyfikator wpisu (Primary Key). |
-| **timestamp** | Dokładny czas zdarzenia z precyzją milisekundową. |
-| **day** | Data zdarzenia w formacie YYYY-MM-DD (ułatwia agregację). |
-| **question** | Treść zapytania DNS wysłanego przez klienta (nazwa domeny). |
-| **question_length** | Długość zapytania wyrażona w liczbie znaków. |
-| **response** | Odpowiedź wygenerowana przez serwer. |
-| **server_ip** | Adres IP lokalnego interfejsu, na którym odebrano ruch. |
-| **server_port** | Port lokalny, na którym nasłuchiwał serwer (domyślnie 53). |
-| **client_ip** | Adres IP hosta inicjującego zapytanie. |
-| **client_port** | Port źródłowy klienta. |
-| **q_type** | Typ rekordu DNS (np. A, AAAA, TXT, ANY, AXFR). |
+### `logs` — raw request log
 
-### Tabela: daily_summary
-Przechowuje zagregowane wyniki analizy bezpieczeństwa.
+| Column | Description |
+|---|---|
+| `id` | Auto-incremented primary key |
+| `timestamp` | Event time with millisecond precision |
+| `day` | Date in `YYYY-MM-DD` format (for aggregation) |
+| `question` | Domain name queried by the client |
+| `question_length` | Length of the queried domain in characters |
+| `response` | Spoofed response data returned by the honeypot |
+| `server_ip` | Local interface address that received the packet |
+| `server_port` | Listening port (default: 53) |
+| `client_ip` | Source IP of the querying host |
+| `client_port` | Source port of the querying host |
+| `q_type` | DNS record type (A, AAAA, TXT, AXFR, …) |
 
-| Kolumna | Opis |
-| :--- | :--- |
-| **day** | Dzień, którego dotyczy podsumowanie (klucz główny). |
-| **by_class** | Nazwa sklasyfikowanej kategorii ataku (klucz główny). |
-| **total_events** | Łączna liczba wykrytych incydentów danej klasy w ciągu dnia. |
-| **first_seen** | Godzina wystąpienia pierwszego zdarzenia danej klasy. |
-| **last_seen** | Godzina wystąpienia ostatniego zdarzenia danej klasy. |
+### `daily_summary` — aggregated threat report
 
----
+| Column | Description |
+|---|---|
+| `day` | Date covered by this summary (primary key) |
+| `by_class` | Threat class name (primary key) |
+| `total_events` | Total incidents of this class on the given day |
+| `first_seen` | Timestamp of the first event |
+| `last_seen` | Timestamp of the most recent event |
 
-## Klasyfikacja Ataków
+## Attack Classification
 
-Silnik analityczny automatycznie rozpoznaje i kategoryzuje następujące zagrożenia:
+The analysis engine runs every hour and writes results to `daily_summary`:
 
-| Klasa ataku | Opis i kryteria detekcji |
-| :--- | :--- |
-| **Flood Attack** | Wykrywany przy intensywnym ruchu (powyżej 50 zapytań na minutę z jednego IP). |
-| **Zone Transfer** | Próby pobrania strefy DNS (typy AXFR/IXFR) w celu rekonesansu sieci. |
-| **DNS Tunneling** | Zapytania powyżej 60 znaków, co sugeruje ukryty kanał komunikacji. |
-| **Amplification Attempt** | Wykorzystanie typów ANY lub TXT do ataków DDoS typu Reflection. |
-| **Forbidden Domain** | Zapytania o domeny zdefiniowane w pliku `forbidden_domains.txt`. |
+| Class | Detection criteria |
+|---|---|
+| **Flood Attack** | More than 60 queries per minute from a single IP |
+| **Zone Transfer** | Queries with type `AXFR`, `IXFR`, or `SOA` |
+| **DNS Tunneling** | Queried domain name longer than 60 characters |
+| **Amplification Attempt** | Queries with type `ANY` or `TXT` |
+| **Forbidden Domain** | Domain listed in `data/forbidden_domains.txt` |
 
----
+Logs older than 3 days are purged automatically to keep the database small.
 
-## Instrukcja Uruchomienia
+## Quick Start
 
-### 1. Przygotowanie struktury plików
-Przed uruchomieniem należy utworzyć katalog na dane oraz plik konfiguracyjny dla domen zabronionych:
+### Prerequisites
+
+- Docker and Docker Compose
+
+### 1. Prepare data directory
+
 ```bash
 mkdir -p data
-touch data/forbidden_domains.txt
+touch data/forbidden_domains.txt   # add one domain per line to track
 ```
-Uruchomienie:
+
+### 2. Start the stack
+
 ```bash
 sudo docker compose up -d --build
 ```
-Usunięcie:
-```bash
-sudo docker compose down -v
-```
 
-### 2. Sprawdzanie logów
-```
-docker compose logs
-```
+### 3. View collected data
 
-### 3. Przegląd zebranych danych
-Interfejs graficzny do zarządzania bazą danych i podglądu tabel jest dostępny bezpośrednio w przeglądarce.
+Open the database UI in your browser:
+
 ```
 http://localhost:8080
 ```
 
-### 4. Przykładowe testy
-```bash
-#!/bin/bash
+### 4. Check logs
 
+```bash
+docker compose logs -f honeypot
+```
+
+### 5. Stop and remove
+
+```bash
+sudo docker compose down -v
+```
+
+## Testing
+
+Send various DNS query types against the honeypot to generate test data:
+
+```bash
 TARGET="127.0.0.1"
 PORT="53"
 
-# 2. Zone Transfer (Próba pobrania strefy)
+# Zone Transfer attempt
 dig @$TARGET -p $PORT example.com AXFR
 dig @$TARGET -p $PORT example.com IXFR
 
-# 3. DNS Tunneling (Długie zapytanie > 60 znaków)
-# LONG_QUERY="v1-a5b6c7d8e9f0g1h2i3j4k5l6m7n8o9p0q1r2s3t4u5v6w7x8y9z0-extra-long-subdomain.example.com"
-# Łącznie ma ok. 80 znaków, ale każda część ma mniej niż 63.
-dig @127.0.0.1 -p 8080 $LONG_QUERY A
-# dig @$TARGET -p $PORT $LONG_QUERY A
+# DNS Tunneling (query > 60 characters)
+LONG="v1-a5b6c7d8e9f0g1h2i3j4k5l6m7n8o9p0q1r2s3t4u5v6w7x8y9z0.example.com"
+dig @$TARGET -p $PORT $LONG A
 
-# 4. Amplification Attempt (Typy ANY i TXT)
+# Amplification attempt
 dig @$TARGET -p $PORT google.com ANY
 dig @$TARGET -p $PORT google.com TXT
 
-# 5. Forbidden Domain (Upewnij się, że domena jest w forbidden_domains.txt)
-# Zakładamy, że dodałeś 'facebook.com' do pliku
-dig @$TARGET -p $PORT zakazanadomena.com A
+# Forbidden domain (add the domain to data/forbidden_domains.txt first)
+dig @$TARGET -p $PORT forbidden.example.com A
 
-# 6. Flood Attack (Wysyłanie 60 zapytań w pętli - limit masz na 50)
-for i in {1..60}
-do
-   dig @$TARGET -p $PORT flood-test-$i.com A +short > /dev/null 2>&1
+# Flood simulation (triggers at 60 req/min)
+for i in {1..65}; do
+    dig @$TARGET -p $PORT flood-test-$i.com A +short > /dev/null 2>&1
 done
-
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE) for details.

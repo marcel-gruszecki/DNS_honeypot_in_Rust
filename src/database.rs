@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2025 Marcel Gruszecki
+
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader};
 use std::net::SocketAddr;
@@ -191,7 +194,6 @@ async fn daily(db: Arc<SqlitePool>, file_path: &str) {
         Err(e) => console_print_err(format!("SQL Error in daily summary: {}", e)),
     }
 
-    // Cleaning logs older than 3 days (Changed from -7 to -3 as requested before)
     match db.execute(sqlx::query("DELETE FROM logs WHERE timestamp < DATETIME('now', '-3 days');")).await {
         Ok(result) => {
             let rows = result.rows_affected();
@@ -217,9 +219,9 @@ pub async fn send_log(db: Arc<SqlitePool>, record: Request, len: usize, addr: So
     )
         .bind(timestamp.format("%Y-%m-%d %H:%M:%S%.3f").to_string())
         .bind(timestamp.format("%Y-%m-%d").to_string())
-        .bind(record.response_text)
+        .bind(record.queried_domain)
         .bind(len as i32)
-        .bind(record.domain)
+        .bind(record.response_data)
         .bind(IP.to_string())
         .bind(PORT)
         .bind(addr.ip().to_string())

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2025 Marcel Gruszecki
+
 use std::net::{Ipv4Addr, Ipv6Addr};
 use hickory_server::proto::op::{Message, MessageType, Query};
 use hickory_server::proto::ProtoError;
@@ -8,18 +11,18 @@ use rand::prelude::*;
 
 #[derive(Clone)]
 pub struct Request {
-    pub domain: String,
+    pub queried_domain: String,
     pub response_type: String,
-    pub response_text: String,
+    pub response_data: String,
     pub response_bytes: Vec<u8>,
 }
 
 impl Request {
     fn new() -> Self {
         Request {
-            domain: String::new(),
+            queried_domain: String::new(),
             response_type: String::new(),
-            response_text: String::new(),
+            response_data: String::new(),
             response_bytes: vec![],
         }
     }
@@ -38,8 +41,8 @@ pub fn handle_request(data: &Vec<u8>) -> Result<Request, ProtoError> {
         let record = build_record(query);
 
         request.response_type = record.record_type().to_string();
-        request.response_text = record.name().to_string();
-        request.domain = record.data().to_string();
+        request.queried_domain = record.name().to_string();
+        request.response_data = record.data().to_string();
 
         response.add_answer(record);
     }
@@ -90,7 +93,7 @@ pub fn build_record(query: &Query) -> Record {
         },
 
         RecordType::TXT => {
-            let txt_name = String::from("TXT_respone");
+            let txt_name = String::from("TXT_response");
             Record::from_rdata(name, ttl, RData::TXT(TXT::new(vec![txt_name])))
         },
 
@@ -143,7 +146,7 @@ fn ipv6_generator(domain: String) -> Ipv6Addr {
     let mut seed: [u8; 32] = [0; 32];
 
     for i in domain.bytes().enumerate() {
-        if i.1 > 31 { break;}
+        if i.0 > 31 { break;}
         seed[i.0] = i.1;
     }
 

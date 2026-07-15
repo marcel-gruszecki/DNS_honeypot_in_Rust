@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2025 Marcel Gruszecki
+
 mod database;
 mod dns;
 mod tcp_module;
